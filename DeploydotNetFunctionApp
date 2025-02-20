@@ -1,0 +1,144 @@
+
+trigger: 
+  branches: 
+    include:
+      - main
+
+  paths: 
+    include:
+      - 'src/**
+
+variables:
+  tag: '$(Build.BuildId)'
+  packagePath: '$(Build. ArtifactStagingDirectory)/projectName.zip"
+parameters:
+  - name: ProjectName
+    type: string
+    default: 'someProjectName'
+  - name: branchName
+    type: string
+    default: 'main'
+  - name: coderepo
+    type: string
+    default: '$(Build. Repository.Name)' 
+  - name: azureSubscription
+    type: string
+    default: 'azure-service-connection'
+  - name: resourceGroupName
+    type: string
+    default: 'rg-name'
+  - name: functionName
+    type: string
+    default: 'dotnetFunctionName' 
+  - name: location
+    type: string
+    default: 'westeurope'
+  - name: appServicePlan
+    type: string
+    default: 'dotnetAppServicePlan' 
+  - name: azureServiceConnection
+    type: string
+    default: 'azureServiceConnection'
+
+stages:
+  - stage: Build
+    jobs:
+      - job: Installing_DOTNET_Core_sdk
+        displayName: 'Installing .NET Core sdk'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: git://${{parameters. ProjectName}}/${{parameters.coderepo}}@refs/heads/${{ parameters.branchName }}
+          - task: UseDotNet@2
+          displayName: 'Use .NET Core sdk 8.x'
+          inputs:
+            packageType: 'sdk'
+            version: 8.x'
+            installationPath: $(Agent. Tools Directory)/dotnet
+          - task: DotNetCoreCLI@2
+            displayName: 'DotNet Build'
+            inputs:
+              command: 'build'
+              projects: **/*.csproj
+              arguments: --output publish_output --configuration Release'
+            - script: |
+                zip -r $(packagePath) . -x "./pipeline/*" "./api/*" ".gitignore" "README.md" "requirements.txt" ".git/" "sonarqubescanning.yaml" "deploy.yaml" "./src/" "packages-microsoft-prod.deb" "readme.md"
+                displayName: 'Archive files excluding specified folders and files'
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish the artifact'
+            inputs:
+              targetPath: $(packagePath)
+              ArtifactName: Drop
+              publishLocation: 'pipeline'
+- stage: SonarQube
+  dependsOn: Build
+  condition: succeededOrFailed()
+  jobs:
+  - job: SonarQube
+    pool:
+      name: pool-name-here 
+steps:
+- download: current
+artifact: ProcessEBFMessages
+- task: Bash@3
+displayName: "Extract Zip Archive"
+inputs:
+  targetType:'inline'
+script: |
+  cd $(Pipeline.Workspace)/ProjectName
+  1s
+  unzip $(Pipeline.Workspace)/ProjectName/Projectname.zip -d $(Build. Sources Directory)/SonarQube
+- task: SonarQubePrepare@7
+  displayName: Prepare Analysis Configuration task
+  inputs:
+    SonarQube: 'sc-sonarqube-scan-code' scanner Mode: "CLI
+    configMode: "manual'
+    cliProjectKey:'provide project name for key'
+  cliSources: '$(Build. Sources Directory)/SonarQube'
+  extraProperties: |
+    sonar.projectName=AT-PowerPlatform-CoE/${{parameters.coderepo}}
+    sonar.projectVersion=1.0.0.0
+    sonar sources.
+    sonar.exclusions**/*.bin
+    sonar.python.version=3.9
+    
+- task: SonarQubeAnalyze@7
+  displayName: Run Code Analysis
+- task: SonarQubeAnalyze@7
+  displayName: Publish the Quality Gate Result 
+  inputs:
+    pollingTimeoutsec: '300'
+- task: sonar-buildbreaker@8
+  displayName: Verify Quality Gate Result
+  inputs:
+    SonarQube: 'sc-sonarqube-scan-code'
+- script: |
+curl -u $(sonarqube-pat): -X GET -o sonarqube-report.pdf "URL for results"
+curl -u $(sonarqube-pat): -X GET -o full-sonarqube-report.json "URL for results" 
+displayName: 'Copy SonarQube report to artifact staging directory'
+
+- stage: Deploy
+  dependsOn: SonarQube
+  condition: succeededOrFailed()
+  - jobs:
+job: Deploy
+  steps:
+  - task: DownloadPipelineArtifact@2
+    inputs:
+      artifact: 'Drop' 
+      buildType: 'current'
+  - task: Bash@3
+    displayName: "Extract Zip Archive"
+    inputs:
+      targetType: 'inline'
+      script: |
+        cd $(Pipeline.Workspace)
+        1s
+        unzip $(Pipeline.Workspace)/drop.zip -d $(Pipeline.Workspace)/projectname
+  - task: AzureFunctionApp@2
+    displayName: 'Azure function app deploy'
+    inputs:
+      azureSubscription: $({ parameters.azureSubscription })
+      appType: 'functionApp'
+      appName: $({ parameters.FunctionName })
+      package: '$(Pipeline.Workspace)/projectName/directory_to_report'
