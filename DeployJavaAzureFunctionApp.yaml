@@ -1,0 +1,149 @@
+trigger
+- main
+
+variables:
+tag:'$(Build.BuildId)'
+azureServiceConnection:"provide SPN name"
+functionAppName:"provide function app name"
+resourceGroupName: "resource group name"
+javaVersion:"8"
+branchName: "main"
+packagePath: "$(Build.ArtifactStagingDirectory)/projectxyz.zip"
+
+parameters:
+- name: branchName
+  type: string
+  default: "provide default branch name"
+- name: coderepo
+  type: string
+  default: "$(Build.DefinitionName)"
+
+stages:
+- stage: Build
+  pool:
+    vmImage: "ubuntu-latest"
+  jobs:
+  - job: Build
+    steps:
+    - checkout: self
+    - task: JavaToolInstaller@0
+      inputs:
+        rootFolderOrFile: "$(Build.SourcesDirectory)/RuleEngine/"
+        versionSpec: $(javaVersion)
+        jdkArchitectureOption: "x64"
+        jdkSourceOptin: "PreInstalled"
+    - script: |
+        sudo apt-get update
+        sudo  apt-get "Install Maven"
+      displayName: "Install Maven"
+    - script: |
+        wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
+        sudo dpkg -i packages-microsoft-prod.deb
+        sudo apt-get update
+        sudo apt-get install azure-functions-core-tools-4
+      displayName: 'Install Azure Functions Core Tools'
+   - script: |
+      cd $(Build. SourcesDirectory)/ProjectDirectory 
+      mun clean install U
+    displayName: 'Maven Clean Install'
+  - script: |
+    zip - $(packagePath). "./pipeline/** ./api/.gitignore" "README.md" "requirements.txt" "git/" "./src/*" "packages-microsoft-prod.deb" "readme.md"
+  displayName: 'Archive files excluding specified folders and files'
+- task: PublishPipelineArtifact@1
+  displayName: 'Publish the artifact'
+  inputs:
+    targetPath: $(packagePath)
+    ArtifactName: drop
+    publishLocation: 'pipeline'
+- stage: SonarQube
+  dependson: Build
+  condition: succeededorfailed()
+  jobs:
+  - job: SonarQube
+  pool:
+    name: provide-the-pool-name-here
+  steps:
+    - download: current
+      artifact: drop
+ - task: Bash@3
+  displayName: "Extract Zip Archive"
+  inputs:
+    targetType: 'inline'
+    script: |
+      unzip $(Pipeline.Workspace)/drop/*.zip -d $(Build. Sources Directory)/SonarQube
+
+  - task: SonarQubePrepare@7
+    displayName: Prepare Analysis Configuration task
+    inputs:
+      SonarQube: 'service-connection-to-SonarQube'
+      scannerMode: 'other'
+      configMode: 'manual'
+      cliProjectKey: 'generate-project-key'
+      cliSources: '$(Build. SourcesDirectory)/SonarQube'
+      extraProperties: |
+        sonar.projectName='provide-project-name-here'
+        sonar.projectVersion=1.0.0.0
+        sonar.sources=.
+        sonar.exclusions=**/*.bin
+        sonar.python.version=3.9
+    - script: |
+        sudo apt-get update
+        sudo apt-get install -y maven
+      displayName: 'Install Maven'
+    - script: |
+        cd $(Build.SourcesDirectory)/SonarQube
+        wget -q https://packages.microsoft.com/config/ubuntu/$(1sb_release -rs)/packages-microsoft-prod. deb sudo dpkg -i packages-microsoft-prod.deb
+        sudo apt-get update
+        sudo apt-get install azure-function-core-tools-4
+      displayName: 'Install Azure Functions Core Tools'
+  - task: Maven@4
+    inputs:
+      mavenPomFile: '$(Build. SourcesDirectory)/SonarQube/pom.xml'
+      options: 'X'
+      publishJUnitResults: false
+      javaHomeOption: 'JDKVersion'
+      mavenVersionOption: 'Path'
+      mavenDirectory: '/usr'
+      mavenSetM2Home: false
+      mavenAuthenticateFeed: false
+      effective PomSkip: false
+      sonarQubeRunAnalysis: true
+      sqMavenPluginVersionChoice: 'latest'
+  - task: SonarQubePublish@7
+    displayName: Publish the Quality Gate Result
+    inputs:
+      polling Timeout Sec: '300'
+  - task: sonar-buildbreaker@8
+    displayName: Verify Quality Gate Result
+    inputs:
+      SonarQube: 'sc-sonarqube-scan-code"
+ - script: |   
+   curl -u $(sonarqube-pat): -X GET -o sonarqube-report.pdf "URL where artifact should be pasted"
+   curl -u $(sonarqube-pat): -X GET -o sonarqube-report.json "URL where artifact should be pasted"
+
+- stage: Deploy
+  pool:
+    vmImage: 'ubuntu-latest'
+  dependsOn: SonarQube
+  condition: succeededOrFailed()
+  jobs:
+  - deployment: Deploy
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+  - task: ExtractFiles@1
+    displayName: Extract artifact
+    inputs:
+      archiveFilePatterns: $(Pipeline. Workspace)/projectname/drop.zip' destinationFolder: $(Pipeline.Workspace)/projectname' 
+      cleanDestinationFolder: false
+      
+    - task: AzureFunctionApp@1
+      inputs:
+        azureSubscription: $(azureServiceConnection) appType: 'functionApp'
+        appName: $(functionAppName)
+        package: $(Pipeline.Workspace)/projectname
+        resourceGroupName: $(resourceGroupName) 
+        deploymentMethod: 'auto'
+        runtimeStack: 'JAVA | 8'
